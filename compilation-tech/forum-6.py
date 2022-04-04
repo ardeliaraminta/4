@@ -1,5 +1,6 @@
 import re
-
+from tracemalloc import start
+import string
 
 
 # token class 
@@ -19,6 +20,7 @@ token_dict = {
     '.'    :'string-concat',
     '//'   :'single-line',
     '#' :'single-comment',
+    '.' : 'concat',
     '/*':'multi-line-comment',
     '*/':'close-multi-comment',
     '$' : 'variable',
@@ -38,119 +40,137 @@ identifier_dict = {
 lines = []
 with open('source.php') as f:
     for line in f:
-        lines.append(line.strip())
+        lines.append(line)
 
 # Scanning
 output = []
 
 def output_line(line_number, column, token_class, token_value = None):
-    return f'{line_number},{column},{token_class}' if token_value == None else f'{line_number},{column},{token_class},{token_value}'
+    return f'{line_number+1},{column+1},{token_class}' if token_value == None else f'{line_number+1},{column},{token_class},{token_value}'
 
-for line_num in range(lines):
+is_string = False
+
+for line_num in range(len(lines)):
     line = lines[line_num]
-    split_words = line.split()
+    # Calculate amount of whitespace (tab)
+    # Add it to the initial column number
+    # Get the index of the first character that is not empty string or \t
 
-    #starts from column 1 
-    column = 1
-    
-    #to check if it is the name of the function or class
-    is_class = False
-    is_function = False
-    is_echo = False
-    # [class] [MyClass]
+    # Calculate whitespace column
+    padding = len(line) - len(line.lstrip())
+    # "   xyz" => padding = 3
 
-    for word in split_words: 
-        # Check if it is a keyword
-        if word == 'class':
-            is_class = True
-            output.append(output_line(line_num, column, 'class'))
-            column = column + len(word)
-            continue
-        elif word == 'function':
-            is_function = True
-            output.append(output_line(line_num, column, 'function'))
-            column = column + len(word)
-            continue
-        elif word == 'echo':
-            is_echo = True
-            output.append(output_line(line_num, column, 'print-out'))
-            column = column + len(word)
-            continue
-        
-        # Check if name of class or function
-        if is_class or is_function:
-            if is_function:
-                # It is name of a function
-                starts_with = re.match("^[a-zA-Z_]", word)  # starts with A-Z or _
-                contains_only = re.findall('[\w_]+$', word) 
-                contains_open_bracket = re.match ("^[(]", word)
-                contains_closing_bracket = re.match("[)]", word)
+    #starts from column 1 (plus any padding) 
+    column = padding
+
+    while column < len(line)-1: 
+        print(line)
+        # Check if contain opening and closing tag
+        if line_num == 0: 
+            if line[column : column + len('<?php')] == '<?php':
+                output.append(output_line(line_num, column, identifier_dict['<?php']))
+                column = column + len('<?php')
+            
                 
-                if starts_with and contains_only and contains_open_bracket:
-                    # myFunction( or myFunction($parameter1
-                    bracket_index = word.index('(')
-                    cleaned_word = word[0:bracket_index] #fuction name without bracket, i.e. myFunction
-                    output.append(output_line(line_num, column, 'type-identifier', cleaned_word))
-                    column = column + len(cleaned_word)
-                    output.append(output_line(line_num, column, token_dict['(']))
-                    column = column + 1
-                    is_function = False
-                    # Check if there is parameter
-                    if bracket_index != len(word)-1:
-                        # myFunction($parameter1
-                        param = word[bracket_index + 1] # Gets $parameter1 
-                        there_is_dollar = param[0:1] == '$' #parameter has to start with $ sign
-
-                        #starts with alphanumeric and underscores 
-                        starts_with = re.match("^[a-zA-Z_]", param[1])
-                        contains_only = re.findall('[\w_]+$', param[1])
-                        if there_is_dollar and starts_with and contains_only:
-                            # Gets the $ sign from $paramter1
-                            output.append(output_line(line_num, column, token_dict['$']))
-                            column = column + 1
-                            # Gets parameter1 from $parameter1
-                            output.append(output_line(line_num, column, 'type-identifier', param[1]))
-                            column = column + len(param[1])
-                        else:
-                            # TODO: Error
-                            pass
-                        #
-                elif starts_with and contains_only and contains_open_bracket and contains_closing_bracket:
-                    # myFunction()
-                    cleaned_word = word[0:-2]
-                    output.append(output_line(line_num, column, 'type-identifier', cleaned_word))
-                    column = column + len(cleaned_word)
-                    output.append(output_line(line_num, column, token_dict['(']))
-                    column = column + 1
-                    output.append(output_line(line_num, column, token_dict[')']))
-                    column = column + 1
-                    is_function = False
-                elif starts_with and contains_only:
-                    # myFunction
-                    output.append(output_line(line_num, column, 'type-identifier', word))
-                    column = column + len(word)
-                    is_function = False
                 continue
             else:
-                # It is name of a class
-                # class [myClass] {
-                starts_with = re.match("^[a-zA-Z_]", word)
-                contains_only = re.findall('[\w_]+$', word)
-                if starts_with and contains_only : 
-                    output.append(output_line(line_num, column, 'type-identifier', word))
-                else:
-                    # TODO: Error
-                    pass
-                is_class = False
+                # todo error: no opening tag
+                pass
+        elif line_num == len(lines)-1: 
+            if line[column : column + len('?>')] == '?>':
+                output.append(output_line(line_num, column, identifier_dict['?>']))
+                column = column + len('?>')
                 continue
-        column = column + 1
+            else:
+                # todo error: no closing tag
+                pass   
 
+        elif line[column] == '\"':
+            is_string = True
+            temp_index = column
+            while is_string:
+                column += 1
+                if line[column] == '\"':
+                    is_string = False
+            column += 1
+            word_string = line[temp_index:column]
+            output.append(output_line(line_num, column, 'string-literal', word_string.replace(" ", "&nbsp")))
 
+        elif line[column:column+len('//')] == '//' or line[column:column+len('#')] == '#':
+            column = len(line)
 
+        # Check if it is a class
+        elif line[column : column + len('class')] == 'class':
+            output.append(output_line(line_num, column, identifier_dict['class']))
+            column = column + len('class') + 1
+            starts_with = re.match("^[a-zA-Z_]", line[column])
+            length = 1
+            if starts_with:
+                contains_only = True
+                while contains_only:
+                    # benerin regex cari yg ga ad spasi
+                    contains_only = re.match('^[A-Za-z]*$', line[column+length]) 
+                    length += 1
+            else:
+                # error no numbers allowed
+                pass
+            output.append(output_line(line_num, column+1, 'type-identifier', line[column:column+length-1]))
+            column += (length-1)
 
             
+            
+        elif line[column : column + len('function')] == 'function':
+            output.append(output_line(line_num, column, identifier_dict['function']))
+            column = column + len('function') + 1
+            starts_with = re.match("^[a-zA-Z_]", line[column])
+            length = 1
+            if starts_with:
+                contains_only = True
+                while contains_only:
+                    contains_only = re.match('[\w_]+$', line[column+length]) 
+                    length += 1
+            else:
+                # error no numbers allowed
+                pass
+            output.append(output_line(line_num, column+1, 'type-identifier', line[column:column+length-1]))
+            column += (length-1)
 
+        elif line[column] =='$':
+            starts_with = re.match("^[a-zA-Z_]", line[column+1])
+            length = 1
+            if starts_with:
+                contains_only = True
+                while contains_only:
+                    contains_only = re.match('[\w_]+$', line[column+length]) 
+                    length += 1
+            else:
+                # error no numbers allowed
+                pass
+            output.append(output_line(line_num, column, 'variable'))
+            output.append(output_line(line_num, column+length-1, 'type-identifier', line[column+1:column+length-1]))
+            column += (length-1)
+
+
+        elif line[column] in "1234567890":
+            length = 0
+            while line[column + length] in "1234567890":
+                length += 1
+            output.append(output_line(line_num, column, 'number', int(line[column:column+length])))
+            column += length 
+
+        elif line[column : column + len('echo')] == 'echo':
+            output.append(output_line(line_num, column, identifier_dict['echo']))
+            column = column + len('echo')
+
+
+
+        elif line[column] in "+-=*/;}().{":
+            output.append(output_line(line_num, column, token_dict[line[column]]))
+            column += 1
+        
+        elif line[column] == ' ':
+            column += 1
         
 
-
-# Output
+for n in output:
+    print(n)
